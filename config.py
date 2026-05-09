@@ -1,0 +1,16 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def _require(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Обязательная переменная окружения не задана: {name}")
+    return value
+
+API_ID: int = int(_require("API_ID"))
+API_HASH: str = _require("API_HASH")
+SESSION_STRING: str = _require("SESSION_STRING")
+OUTPUT_CHAT: int = int(_require("OUTPUT_CHAT"))
+DB_PATH: str = os.getenv("DB_PATH", "filters.db")
