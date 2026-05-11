@@ -47,7 +47,6 @@ async def main() -> None:
             count += 1
         log.info("Синхронизировано диалогов: %d", count)
 
-        log.info("OUTPUT_CHAT: %d", config.OUTPUT_CHAT)
         log.info(
             "Управление: отправляйте команды с префиксом '.' в Saved Messages. "
             "Начните с .help"

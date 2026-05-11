@@ -12,5 +12,4 @@ def _require(name: str) -> str:
 API_ID: int = int(_require("API_ID"))
 API_HASH: str = _require("API_HASH")
 SESSION_STRING: str = _require("SESSION_STRING")
-OUTPUT_CHAT: int = int(_require("OUTPUT_CHAT"))
 DB_PATH: str = os.getenv("DB_PATH", "filters.db")

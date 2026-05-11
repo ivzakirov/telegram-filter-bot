@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/home/ziay/claude-projects/dummy/telegram-filter-bot/gen_session.py", line 15, in <module>
-    from pyrogram.types import StringSession
-ImportError: cannot import name 'StringSession' from 'pyrogram.types' (/home/ziay/claude-projects/dummy/telegram-filter-bot/myvenv/lib/python3.14/site-packages/pyrogram/types/__init__.py)
