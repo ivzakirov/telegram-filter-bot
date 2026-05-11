@@ -1,9 +1,8 @@
 from __future__ import annotations
 import asyncio
 import logging
-from pyrogram import Client
-from pyrogram.handlers import MessageHandler
-from pyrogram.errors import FloodWait
+from telethon import events
+from telethon.errors import FloodWaitError
 import service
 import storage
 from config import OUTPUT_CHAT
@@ -11,56 +10,48 @@ from config import OUTPUT_CHAT
 log = logging.getLogger(__name__)
 
 
-async def _handle(client: Client, message) -> None:
+async def _handle(event: events.NewMessage.Event) -> None:
     try:
-        if not await storage.is_monitored(message.chat.id):
-            log.info("Чат не в списке отслеживаемых: chat=%d msg=%d",
-                message.chat.id,
-                message.id)
+        if event.out:  # не обрабатываем собственные сообщения
             return
 
-        text: str = message.text or message.caption or ""
+        chat_id = event.chat_id
+        if not await storage.is_monitored(chat_id):
+            return
+
+        text: str = event.raw_text or ""
         if not text.strip():
-            log.info("Пустое сообщение: chat=%d msg=%d",
-                message.chat.id,
-                message.id)
             return
 
-        log.info("Проверка сообщения...: chat=%d msg=%d text=[%s]",
-            message.chat.id,
-            message.id,
-            text)
-
-        matched = await service.get_matching_filters(message.chat.id, text)
+        matched = await service.get_matching_filters(chat_id, text)
         if not matched:
             return
 
-        chat_title = getattr(message.chat, "title", None) or str(message.chat.id)
+        chat = await event.get_chat()
+        chat_title = getattr(chat, "title", None) or str(chat_id)
+
         log.info(
             "Совпадение: chat=%d msg=%d filters=[%s]",
-            message.chat.id,
-            message.id,
+            chat_id,
+            event.message.id,
             ", ".join(matched),
         )
 
+        client = event.client
         try:
-            await client.forward_messages(OUTPUT_CHAT, message.chat.id, message.id)
-        except FloodWait as e:
-            log.warning("FloodWait %ds при пересылке", e.value)
-            await asyncio.sleep(e.value)
-            await client.forward_messages(OUTPUT_CHAT, message.chat.id, message.id)
+            await client.forward_messages(OUTPUT_CHAT, messages=event.message.id, from_peer=chat_id)
+        except FloodWaitError as e:
+            log.warning("FloodWait %ds при пересылке", e.seconds)
+            await asyncio.sleep(e.seconds)
+            await client.forward_messages(OUTPUT_CHAT, messages=event.message.id, from_peer=chat_id)
 
         await client.send_message(
             OUTPUT_CHAT,
             f"📌 {chat_title} — фильтры: {', '.join(matched)}",
         )
     except Exception:
-        log.exception(
-            "Ошибка в incoming handler: chat=%d msg=%d",
-            message.chat.id,
-            message.id,
-        )
+        log.exception("Ошибка в incoming handler: chat=%d", event.chat_id)
 
 
-def register(app: Client) -> None:
-    app.add_handler(MessageHandler(_handle), group=1)
+def register(client) -> None:
+    client.add_event_handler(_handle, events.NewMessage())

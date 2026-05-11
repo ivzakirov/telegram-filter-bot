@@ -1,10 +1,8 @@
 import asyncio
-# Python 3.10+ не создаёт event loop автоматически; Pyrogram требует его до импорта.
-asyncio.set_event_loop(asyncio.new_event_loop())
-
 import logging
 import logging.handlers
-from pyrogram import Client
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 import config
 import storage
 from handlers import incoming, commands
@@ -19,7 +17,7 @@ def _setup_logging() -> None:
         ),
     ]
     logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
-    logging.getLogger("pyrogram").setLevel(logging.WARNING)
+    logging.getLogger("telethon").setLevel(logging.WARNING)
 
 
 async def main() -> None:
@@ -29,26 +27,22 @@ async def main() -> None:
     await storage.init_db()
     log.info("База данных инициализирована: %s", config.DB_PATH)
 
-    app = Client(
-        "userbot",
-        api_id=config.API_ID,
-        api_hash=config.API_HASH,
-        session_string=config.SESSION_STRING,
+    client = TelegramClient(
+        StringSession(config.SESSION_STRING),
+        config.API_ID,
+        config.API_HASH,
     )
 
-    incoming.register(app)
-    commands.register(app)
+    incoming.register(client)
+    commands.register(client)
 
-    log.info("Userbot запускается…")
-    async with app:
-        me = await app.get_me()
+    async with client:
+        me = await client.get_me()
         log.info("Авторизован как: %s (id=%d)", me.username or me.first_name, me.id)
 
-        # Синхронизируем все диалоги — без этого Telegram не шлёт обновления
-        # из части групп и каналов до первого взаимодействия с ними.
         log.info("Синхронизация диалогов…")
         count = 0
-        async for _ in app.get_dialogs():
+        async for _ in client.iter_dialogs():
             count += 1
         log.info("Синхронизировано диалогов: %d", count)
 
@@ -56,7 +50,7 @@ async def main() -> None:
             "Управление: отправляйте команды с префиксом '.' в Saved Messages. "
             "Начните с .help"
         )
-        await asyncio.Event().wait()
+        await client.run_until_disconnected()
 
 
 if __name__ == "__main__":

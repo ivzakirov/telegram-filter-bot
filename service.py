@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 from typing import Optional
+from telethon.utils import get_peer_id
 import expr_parser
 import storage
 
@@ -36,31 +37,26 @@ async def remove_filter(name: str) -> bool:
 
 
 async def add_chat(client, identifier: str) -> storage.MonitoredChat:
-    from pyrogram.errors import UsernameNotOccupied, PeerIdInvalid, ChannelInvalid
+    from telethon.errors import UsernameNotOccupiedError, UsernameInvalidError
 
     try:
-        chat = await client.get_chat(identifier)
-    except (UsernameNotOccupied, PeerIdInvalid, ChannelInvalid, KeyError) as e:
+        entity = await client.get_entity(identifier)
+    except (ValueError, UsernameNotOccupiedError, UsernameInvalidError, TypeError) as e:
         raise ValueError(f"Чат не найден: {identifier}") from e
 
-    try:
-        await client.get_chat_member(chat.id, "me")
-    except Exception:
-        raise ValueError(
-            f"Вы не являетесь участником чата «{chat.title}». "
-            "Вступите в него через Telegram и попробуйте снова."
-        )
+    chat_id = get_peer_id(entity)
+    title = getattr(entity, "title", None) or getattr(entity, "first_name", str(chat_id))
+    username = getattr(entity, "username", None)
 
-    username = getattr(chat, "username", None)
-    await storage.save_chat(chat.id, chat.title, username)
-    log.info("Чат добавлен: id=%d title=%r", chat.id, chat.title)
-    return storage.MonitoredChat(chat.id, chat.title, username)
+    await storage.save_chat(chat_id, title, username)
+    log.info("Чат добавлен: id=%d title=%r", chat_id, title)
+    return storage.MonitoredChat(chat_id, title, username)
 
 
 async def remove_chat(client, identifier: str) -> bool:
     try:
-        chat = await client.get_chat(identifier)
-        chat_id = chat.id
+        entity = await client.get_entity(identifier)
+        chat_id = get_peer_id(entity)
     except Exception:
         try:
             chat_id = int(identifier)

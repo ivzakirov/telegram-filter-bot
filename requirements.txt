@@ -1,4 +1,4 @@
-pyrogram==2.0.106
-tgcrypto==1.2.5
+telethon==1.36.0
+cryptg
 aiosqlite==0.20.0
 python-dotenv==1.0.1
