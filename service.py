@@ -8,7 +8,7 @@ import storage
 log = logging.getLogger(__name__)
 
 
-async def get_matching_filters(chat_id: int, text: str) -> list[str]:
+async def get_matching_filters(chat_id: int, text: str, author: str = "") -> list[str]:
     """
     Decide whether a message should be forwarded and why.
 
@@ -30,7 +30,7 @@ async def get_matching_filters(chat_id: int, text: str) -> list[str]:
     # Step 1: check block filters
     for f in block_filters:
         try:
-            if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text):
+            if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text, author):
                 log.debug("Blocked by filter '%s': chat=%d", f.name, chat_id)
                 return []
         except Exception:
@@ -41,7 +41,7 @@ async def get_matching_filters(chat_id: int, text: str) -> list[str]:
         matched = []
         for f in allow_filters:
             try:
-                if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text):
+                if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text, author):
                     matched.append(f.name)
             except Exception:
                 log.warning("Ошибка при вычислении allow-фильтра '%s'", f.name, exc_info=True)

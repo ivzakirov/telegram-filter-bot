@@ -16,7 +16,7 @@ _HELP = """
 `.add_filter [allow|block] <имя> <выражение>` — добавить фильтр
 `.remove_filter <имя>` — удалить фильтр
 `.list_filters` — список всех фильтров
-`.test <имя> <текст>` — проверить фильтр на тексте
+`.test <имя> <текст>` — проверить фильтр на тексте (добавьте `--from @user` для проверки по автору)
 
 `.status` — сводка
 `.help` — эта справка
@@ -30,10 +30,12 @@ _HELP = """
 `AND`, `OR`, `NOT`, скобки `()`, фразы в `"кавычках"`
 Wildcards: `python*`, `*реклам*`, `байк?`
 Regex: `/паттерн/` например `/py(thon|3)/`
+Автор: `@username` — совпадает с отправителем по юзернейму (или ID если нет username)
 
 Примеры:
   `.add_filter news python AND (flask OR django) AND NOT вакансия`
   `.add_filter block spam реклама* OR /купи[те]?/`
+  `.add_filter block spammer @bad_user`
   `.add_filter allow urgent срочно OR важно`
 """.strip()
 
@@ -149,9 +151,17 @@ async def _cmd_list_filters(event, _args: str) -> None:
 
 
 async def _cmd_test(event, args: str) -> None:
+    # Optional: --from @username at the end
+    author = ""
+    if "--from" in args:
+        idx = args.rfind("--from")
+        from_str = args[idx + len("--from"):].strip().lstrip("@")
+        args = args[:idx].strip()
+        author = from_str
+
     parts = args.split(maxsplit=1)
     if len(parts) < 2:
-        await event.respond("Использование: `.test <имя_фильтра> <текст>`")
+        await event.respond("Использование: `.test <имя_фильтра> <текст> [--from @username]`")
         return
 
     name, text = parts[0], parts[1]
@@ -164,12 +174,13 @@ async def _cmd_test(event, args: str) -> None:
     try:
         import expr_parser
         ast = expr_parser.parse(target.expression)
-        result = expr_parser.evaluate(ast, text)
+        result = expr_parser.evaluate(ast, text, author)
         icon = "✅" if result else "❌"
         type_label = "block" if target.type == "block" else "allow"
+        author_note = f"\nАвтор: `@{author}`" if author else ""
         await event.respond(
             f"{icon} Фильтр **{name}** [{type_label}] (`{target.expression}`)\n"
-            f"Текст: _{text}_\n"
+            f"Текст: _{text}_{author_note}\n"
             f"Результат: **{'совпадение' if result else 'нет совпадения'}**"
         )
     except Exception as e:

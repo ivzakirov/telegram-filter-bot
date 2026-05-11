@@ -67,7 +67,7 @@ def _tokenize(text: str) -> list[_Token]:
             tokens.append(_Token(_TT.TERM, pattern, "regex"))
             i = j + 1
         else:
-            # Plain word or glob (contains * or ?)
+            # Plain word, glob (contains * or ?), or @username (author filter)
             j = i
             while j < len(text) and not text[j].isspace() and text[j] not in '()"/' :
                 j += 1
@@ -78,6 +78,10 @@ def _tokenize(text: str) -> list[_Token]:
                 tokens.append(_Token(_TT.OR))
             elif word == "NOT":
                 tokens.append(_Token(_TT.NOT))
+            elif word.startswith("@"):
+                if len(word) < 2:
+                    raise SyntaxError("Пустой @username в выражении")
+                tokens.append(_Token(_TT.TERM, word[1:], "author"))
             elif word:
                 mode = "glob" if ("*" in word or "?" in word) else "substr"
                 tokens.append(_Token(_TT.TERM, word, mode))
@@ -93,7 +97,7 @@ def _tokenize(text: str) -> list[_Token]:
 @dataclass
 class TermNode:
     value: str
-    mode: str = "substr"  # "substr" | "glob" | "regex"
+    mode: str = "substr"  # "substr" | "glob" | "regex" | "author"
 
 @dataclass
 class NotNode:
@@ -189,34 +193,40 @@ def parse(expression: str) -> Node:
 # Evaluator
 # ---------------------------------------------------------------------------
 
-def evaluate(node: Node, text: str) -> bool:
-    """Return True if *text* satisfies the boolean expression represented by *node*."""
-    return _eval(node, text.lower())
+def evaluate(node: Node, text: str, author: str = "") -> bool:
+    """Return True if the message satisfies the expression.
+
+    Args:
+        node:   parsed AST
+        text:   raw message text
+        author: sender username (without @) or user ID as string; empty if unknown
+    """
+    return _eval(node, text.lower(), author.lower())
 
 
-def _match_term(node: TermNode, text_lower: str) -> bool:
+def _match_term(node: TermNode, text_lower: str, author_lower: str) -> bool:
+    if node.mode == "author":
+        return node.value.lower() == author_lower
     if node.mode == "regex":
         try:
             return bool(_re.search(node.value, text_lower, _re.IGNORECASE))
         except _re.error:
             return False
     if node.mode == "glob":
-        # Translate glob wildcards to regex, keep as substring match
         pattern = _re.escape(node.value).replace(r"\*", ".*").replace(r"\?", ".")
         return bool(_re.search(pattern, text_lower, _re.IGNORECASE))
-    # Default: case-insensitive substring match
     return node.value.lower() in text_lower
 
 
-def _eval(node: Node, text_lower: str) -> bool:
+def _eval(node: Node, text_lower: str, author_lower: str = "") -> bool:
     if isinstance(node, TermNode):
-        return _match_term(node, text_lower)
+        return _match_term(node, text_lower, author_lower)
     if isinstance(node, NotNode):
-        return not _eval(node.operand, text_lower)
+        return not _eval(node.operand, text_lower, author_lower)
     if isinstance(node, AndNode):
-        return _eval(node.left, text_lower) and _eval(node.right, text_lower)
+        return _eval(node.left, text_lower, author_lower) and _eval(node.right, text_lower, author_lower)
     if isinstance(node, OrNode):
-        return _eval(node.left, text_lower) or _eval(node.right, text_lower)
+        return _eval(node.left, text_lower, author_lower) or _eval(node.right, text_lower, author_lower)
     raise TypeError(f"Unknown AST node type: {type(node)}")
 
 

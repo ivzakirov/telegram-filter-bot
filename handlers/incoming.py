@@ -12,6 +12,39 @@ log = logging.getLogger(__name__)
 # Serialise all OUTPUT_CHAT writes to avoid Telegram rate-limit errors on burst catch-up
 _output_lock = asyncio.Lock()
 
+# Media group (album) accumulation: grouped_id → list of message IDs
+_pending_groups: dict[int, list[int]] = {}
+_group_meta: dict[int, tuple] = {}  # grouped_id → (client, chat_id, chat_title, filter_label)
+
+
+async def _flush_group(grouped_id: int) -> None:
+    """Wait for the rest of an album to arrive, then forward all photos at once."""
+    await asyncio.sleep(1.0)
+    msg_ids = _pending_groups.pop(grouped_id, [])
+    meta = _group_meta.pop(grouped_id, None)
+    if not msg_ids or not meta:
+        return
+    client, chat_id, chat_title, filter_label = meta
+    try:
+        async with _output_lock:
+            forwarded = False
+            try:
+                await client.forward_messages(OUTPUT_CHAT, messages=msg_ids, from_peer=chat_id)
+                forwarded = True
+                log.info("Переслано (альбом %d фото): chat=%d → OUTPUT_CHAT", len(msg_ids), chat_id)
+            except ChatForwardsRestrictedError:
+                log.warning("Пересылка запрещена в чате %d — отправляю только уведомление", chat_id)
+            except FloodWaitError as e:
+                log.warning("FloodWait %ds при пересылке альбома", e.seconds)
+                await asyncio.sleep(e.seconds)
+                await client.forward_messages(OUTPUT_CHAT, messages=msg_ids, from_peer=chat_id)
+                forwarded = True
+
+            prefix = "📌" if forwarded else "⚠️ (пересылка запрещена)"
+            await client.send_message(OUTPUT_CHAT, f"{prefix} {chat_title} — {filter_label}")
+    except Exception:
+        log.exception("Ошибка при пересылке альбома: chat=%d grouped_id=%d", chat_id, grouped_id)
+
 
 async def _handle(event: events.NewMessage.Event) -> None:
     try:
@@ -26,8 +59,14 @@ async def _handle(event: events.NewMessage.Event) -> None:
 
         text: str = event.raw_text or ""
 
-        matched = await service.get_matching_filters(chat_id, text)
-        log.debug("Фильтрация: chat=%s matched=%s", chat_id, matched)
+        sender = await event.get_sender()
+        if sender:
+            author = getattr(sender, "username", None) or str(getattr(sender, "id", ""))
+        else:
+            author = ""
+
+        matched = await service.get_matching_filters(chat_id, text, author)
+        log.debug("Фильтрация: chat=%s author=%s matched=%s", chat_id, author, matched)
         if not matched:
             return
 
@@ -41,6 +80,16 @@ async def _handle(event: events.NewMessage.Event) -> None:
 
         log.info("Совпадение: chat=%d msg=%d %s", chat_id, event.message.id, filter_label)
 
+        # Media group (album): accumulate all photos, flush after 1s
+        grouped_id = event.message.grouped_id
+        if grouped_id:
+            _pending_groups.setdefault(grouped_id, []).append(event.message.id)
+            if grouped_id not in _group_meta:
+                _group_meta[grouped_id] = (event.client, chat_id, chat_title, filter_label)
+                asyncio.create_task(_flush_group(grouped_id))
+            return
+
+        # Single message
         client = event.client
         forwarded = False
         async with _output_lock:
