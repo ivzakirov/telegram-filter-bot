@@ -1,5 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
+import re as _re
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Union
 
@@ -22,6 +23,7 @@ class _TT(Enum):
 class _Token:
     type: _TT
     value: str = ""
+    mode: str = "substr"  # "substr" | "glob" | "regex"
 
 
 def _tokenize(text: str) -> list[_Token]:
@@ -38,16 +40,36 @@ def _tokenize(text: str) -> list[_Token]:
             tokens.append(_Token(_TT.RPAREN))
             i += 1
         elif ch == '"':
+            # Quoted phrase → exact substring match
             j = i + 1
             while j < len(text) and text[j] != '"':
                 j += 1
             if j >= len(text):
                 raise SyntaxError("Незакрытая кавычка в выражении")
-            tokens.append(_Token(_TT.TERM, text[i + 1 : j]))
+            tokens.append(_Token(_TT.TERM, text[i + 1 : j], "substr"))
+            i = j + 1
+        elif ch == "/":
+            # Regex pattern: /pattern/
+            j = i + 1
+            while j < len(text) and text[j] != "/":
+                if text[j] == "\\" and j + 1 < len(text):
+                    j += 2  # skip escaped char
+                else:
+                    j += 1
+            if j >= len(text):
+                raise SyntaxError("Незакрытый regex-паттерн (нет закрывающего '/')")
+            pattern = text[i + 1 : j]
+            # Validate regex at parse time
+            try:
+                _re.compile(pattern)
+            except _re.error as e:
+                raise SyntaxError(f"Некорректный regex '{pattern}': {e}") from e
+            tokens.append(_Token(_TT.TERM, pattern, "regex"))
             i = j + 1
         else:
+            # Plain word or glob (contains * or ?)
             j = i
-            while j < len(text) and not text[j].isspace() and text[j] not in '()"':
+            while j < len(text) and not text[j].isspace() and text[j] not in '()"/' :
                 j += 1
             word = text[i:j]
             if word == "AND":
@@ -57,7 +79,8 @@ def _tokenize(text: str) -> list[_Token]:
             elif word == "NOT":
                 tokens.append(_Token(_TT.NOT))
             elif word:
-                tokens.append(_Token(_TT.TERM, word))
+                mode = "glob" if ("*" in word or "?" in word) else "substr"
+                tokens.append(_Token(_TT.TERM, word, mode))
             i = j
     tokens.append(_Token(_TT.EOF))
     return tokens
@@ -70,6 +93,7 @@ def _tokenize(text: str) -> list[_Token]:
 @dataclass
 class TermNode:
     value: str
+    mode: str = "substr"  # "substr" | "glob" | "regex"
 
 @dataclass
 class NotNode:
@@ -149,9 +173,9 @@ class _Parser:
             return node
         if tok.type == _TT.TERM:
             self._consume(_TT.TERM)
-            return TermNode(tok.value)
+            return TermNode(tok.value, tok.mode)
         raise SyntaxError(
-            f"Ожидалось слово или '(', получено "
+            f"Ожидалось слово, паттерн или '(', получено "
             + (f"{tok.value!r}" if tok.value else tok.type.name)
         )
 
@@ -170,9 +194,23 @@ def evaluate(node: Node, text: str) -> bool:
     return _eval(node, text.lower())
 
 
+def _match_term(node: TermNode, text_lower: str) -> bool:
+    if node.mode == "regex":
+        try:
+            return bool(_re.search(node.value, text_lower, _re.IGNORECASE))
+        except _re.error:
+            return False
+    if node.mode == "glob":
+        # Translate glob wildcards to regex, keep as substring match
+        pattern = _re.escape(node.value).replace(r"\*", ".*").replace(r"\?", ".")
+        return bool(_re.search(pattern, text_lower, _re.IGNORECASE))
+    # Default: case-insensitive substring match
+    return node.value.lower() in text_lower
+
+
 def _eval(node: Node, text_lower: str) -> bool:
     if isinstance(node, TermNode):
-        return node.value.lower() in text_lower
+        return _match_term(node, text_lower)
     if isinstance(node, NotNode):
         return not _eval(node.operand, text_lower)
     if isinstance(node, AndNode):

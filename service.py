@@ -9,24 +9,62 @@ log = logging.getLogger(__name__)
 
 
 async def get_matching_filters(chat_id: int, text: str) -> list[str]:
+    """
+    Decide whether a message should be forwarded and why.
+
+    Returns:
+      []    — message is blocked or no allow-filter matched (do not forward)
+      ["*"] — no allow-filters defined, message passed through (blocks not triggered)
+      [names...] — matched allow-filter names (forward with these labels)
+
+    Logic:
+      1. If any block-filter matches → block regardless of allow-filters.
+      2. If allow-filters exist → forward only if at least one matches.
+      3. If no allow-filters exist → forward everything not blocked ("pass-all" mode).
+    """
     filters = await storage.get_filters_for_chat(chat_id)
-    matched: list[str] = []
-    for f in filters:
+
+    allow_filters = [f for f in filters if f.type == "allow"]
+    block_filters = [f for f in filters if f.type == "block"]
+
+    # Step 1: check block filters
+    for f in block_filters:
         try:
-            ast = expr_parser.get_ast(f.id, f.expression)
-            if expr_parser.evaluate(ast, text):
-                matched.append(f.name)
+            if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text):
+                log.debug("Blocked by filter '%s': chat=%d", f.name, chat_id)
+                return []
         except Exception:
-            log.warning("Ошибка при вычислении фильтра '%s'", f.name, exc_info=True)
-    return matched
+            log.warning("Ошибка при вычислении block-фильтра '%s'", f.name, exc_info=True)
+
+    # Step 2: check allow filters
+    if allow_filters:
+        matched = []
+        for f in allow_filters:
+            try:
+                if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text):
+                    matched.append(f.name)
+            except Exception:
+                log.warning("Ошибка при вычислении allow-фильтра '%s'", f.name, exc_info=True)
+        return matched  # empty list → no match → do not forward
+
+    # Step 3: pass-all mode (no allow filters, blocks already checked)
+    return ["*"]
 
 
 async def add_filter(
-    name: str, expression: str, chat_id: Optional[int] = None
+    name: str,
+    expression: str,
+    chat_id: Optional[int] = None,
+    filter_type: str = "allow",
 ) -> None:
+    if filter_type not in ("allow", "block"):
+        raise ValueError(f"Неизвестный тип фильтра: {filter_type!r}. Используйте 'allow' или 'block'")
     expr_parser.parse(expression)  # raises SyntaxError if invalid
-    await storage.save_filter(name, expression, chat_id)
-    log.info("Фильтр добавлен: name=%s chat_id=%s expr=%r", name, chat_id, expression)
+    await storage.save_filter(name, expression, chat_id, filter_type)
+    log.info(
+        "Фильтр добавлен: name=%s type=%s chat_id=%s expr=%r",
+        name, filter_type, chat_id, expression,
+    )
 
 
 async def remove_filter(name: str) -> bool:

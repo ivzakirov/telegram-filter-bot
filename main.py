@@ -16,8 +16,9 @@ def _setup_logging() -> None:
             "userbot.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8"
         ),
     ]
-    logging.basicConfig(level=logging.INFO, format=fmt, handlers=handlers)
+    logging.basicConfig(level=logging.DEBUG, format=fmt, handlers=handlers)
     logging.getLogger("telethon").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
 
 async def main() -> None:
@@ -46,11 +47,25 @@ async def main() -> None:
             count += 1
         log.info("Синхронизировано диалогов: %d", count)
 
+        log.info("OUTPUT_CHAT: %d", config.OUTPUT_CHAT)
         log.info(
             "Управление: отправляйте команды с префиксом '.' в Saved Messages. "
             "Начните с .help"
         )
+
+        asyncio.create_task(_keepalive(client, log))
         await client.run_until_disconnected()
+
+
+async def _keepalive(client: TelegramClient, log: logging.Logger) -> None:
+    """Периодический пинг, чтобы сессия считалась активной и получала обновления без задержек."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await client.get_me()
+            log.debug("keepalive: ok")
+        except Exception:
+            log.warning("keepalive: ошибка", exc_info=True)
 
 
 if __name__ == "__main__":

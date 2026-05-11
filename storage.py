@@ -12,6 +12,7 @@ class Filter:
     name: str
     expression: str
     chat_id: Optional[int]
+    type: str = "allow"  # "allow" | "block"
 
 
 @dataclass
@@ -21,7 +22,6 @@ class MonitoredChat:
     username: Optional[str]
 
 
-# In-memory set of monitored chat IDs to avoid a DB hit on every message.
 _monitored_ids: Optional[set[int]] = None
 
 
@@ -40,9 +40,15 @@ async def init_db() -> None:
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 name       TEXT    NOT NULL,
                 expression TEXT    NOT NULL,
-                chat_id    INTEGER
+                chat_id    INTEGER,
+                type       TEXT    NOT NULL DEFAULT 'allow'
             )
         """)
+        # Migration: add 'type' column to existing DBs that don't have it yet
+        try:
+            await db.execute("ALTER TABLE filters ADD COLUMN type TEXT NOT NULL DEFAULT 'allow'")
+        except Exception:
+            pass  # Column already exists
         await db.commit()
 
 
@@ -96,7 +102,7 @@ async def get_all_chats() -> list[MonitoredChat]:
 async def get_filters_for_chat(chat_id: int) -> list[Filter]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, name, expression, chat_id FROM filters "
+            "SELECT id, name, expression, chat_id, type FROM filters "
             "WHERE chat_id = ? OR chat_id IS NULL ORDER BY id",
             (chat_id,),
         ) as cur:
@@ -105,10 +111,12 @@ async def get_filters_for_chat(chat_id: int) -> list[Filter]:
 
 
 async def save_filter(
-    name: str, expression: str, chat_id: Optional[int] = None
+    name: str,
+    expression: str,
+    chat_id: Optional[int] = None,
+    filter_type: str = "allow",
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
-        # Check for existing filter with same name+chat_id (NULL-safe comparison).
         async with db.execute(
             "SELECT id FROM filters WHERE name = ? AND chat_id IS ?",
             (name, chat_id),
@@ -118,14 +126,14 @@ async def save_filter(
         if existing:
             fid = existing[0]
             await db.execute(
-                "UPDATE filters SET expression = ? WHERE id = ?",
-                (expression, fid),
+                "UPDATE filters SET expression = ?, type = ? WHERE id = ?",
+                (expression, filter_type, fid),
             )
             expr_parser.invalidate(fid)
         else:
             await db.execute(
-                "INSERT INTO filters (name, expression, chat_id) VALUES (?, ?, ?)",
-                (name, expression, chat_id),
+                "INSERT INTO filters (name, expression, chat_id, type) VALUES (?, ?, ?, ?)",
+                (name, expression, chat_id, filter_type),
             )
         await db.commit()
 
@@ -148,7 +156,7 @@ async def delete_filter(name: str) -> bool:
 async def get_all_filters() -> list[Filter]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, name, expression, chat_id FROM filters ORDER BY name, chat_id"
+            "SELECT id, name, expression, chat_id, type FROM filters ORDER BY type DESC, name, chat_id"
         ) as cur:
             rows = await cur.fetchall()
     return [Filter(*row) for row in rows]

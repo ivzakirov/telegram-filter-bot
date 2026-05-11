@@ -13,8 +13,7 @@ _HELP = """
 `.remove_chat @username|chat_id` — убрать из мониторинга
 `.list_chats` — список отслеживаемых чатов
 
-`.add_filter <имя> <выражение>` — добавить глобальный фильтр
-`.add_filter <имя> <выражение> --chat @username` — фильтр для конкретного чата
+`.add_filter [allow|block] <имя> <выражение>` — добавить фильтр
 `.remove_filter <имя>` — удалить фильтр
 `.list_filters` — список всех фильтров
 `.test <имя> <текст>` — проверить фильтр на тексте
@@ -22,12 +21,20 @@ _HELP = """
 `.status` — сводка
 `.help` — эта справка
 
+**Типы фильтров:**
+• `allow` (по умолчанию) — пропустить сообщение если совпадает
+• `block` — заблокировать сообщение если совпадает
+Если заданы только `block`-фильтры — все сообщения проходят кроме заблокированных.
+
 **Синтаксис выражений:**
 `AND`, `OR`, `NOT`, скобки `()`, фразы в `"кавычках"`
+Wildcards: `python*`, `*реклам*`, `байк?`
+Regex: `/паттерн/` например `/py(thon|3)/`
 
 Примеры:
   `.add_filter news python AND (flask OR django) AND NOT вакансия`
-  `.add_filter crypto (bitcoin OR ethereum) AND NOT реклама`
+  `.add_filter block spam реклама* OR /купи[те]?/`
+  `.add_filter allow urgent срочно OR важно`
 """.strip()
 
 
@@ -71,6 +78,7 @@ async def _cmd_list_chats(event, _args: str) -> None:
 
 
 async def _cmd_add_filter(event, args: str) -> None:
+    # Syntax: [allow|block] <name> <expression> [--chat @identifier]
     chat_id = None
 
     if "--chat" in args:
@@ -88,19 +96,27 @@ async def _cmd_add_filter(event, args: str) -> None:
             await event.respond(f"❌ Не удалось найти чат: {e}")
             return
 
+    # Detect optional type keyword (allow/block) as first word
+    filter_type = "allow"
+    words = args.split(maxsplit=1)
+    if words and words[0].lower() in ("allow", "block"):
+        filter_type = words[0].lower()
+        args = words[1] if len(words) > 1 else ""
+
     parts = args.split(maxsplit=1)
     if len(parts) < 2:
         await event.respond(
-            "Использование: `.add_filter <имя> <выражение>`\n"
-            "Пример: `.add_filter news python AND NOT вакансия`"
+            "Использование: `.add_filter [allow|block] <имя> <выражение>`\n"
+            "Пример: `.add_filter block spam реклама* OR /купи[те]?/`"
         )
         return
 
     name, expression = parts[0], parts[1]
     try:
-        await service.add_filter(name, expression, chat_id)
+        await service.add_filter(name, expression, chat_id, filter_type)
         scope = f" для чата `{chat_id}`" if chat_id else " (глобальный)"
-        await event.respond(f"✅ Фильтр **{name}** добавлен{scope}")
+        type_label = "🚫 block" if filter_type == "block" else "✅ allow"
+        await event.respond(f"{type_label} фильтр **{name}** добавлен{scope}")
     except SyntaxError as e:
         await event.respond(f"❌ Ошибка в выражении: {e}")
     except Exception as e:
@@ -126,8 +142,9 @@ async def _cmd_list_filters(event, _args: str) -> None:
         return
     lines = ["**Фильтры:**"]
     for f in fltrs:
-        scope = f" [chat {f.chat_id}]" if f.chat_id else " [глобальный]"
-        lines.append(f"• **{f.name}**{scope}: `{f.expression}`")
+        scope = f" [chat {f.chat_id}]" if f.chat_id else ""
+        icon = "🚫" if f.type == "block" else "✅"
+        lines.append(f"{icon} **{f.name}**{scope}: `{f.expression}`")
     await event.respond("\n".join(lines))
 
 
@@ -149,8 +166,9 @@ async def _cmd_test(event, args: str) -> None:
         ast = expr_parser.parse(target.expression)
         result = expr_parser.evaluate(ast, text)
         icon = "✅" if result else "❌"
+        type_label = "block" if target.type == "block" else "allow"
         await event.respond(
-            f"{icon} Фильтр **{name}** (`{target.expression}`)\n"
+            f"{icon} Фильтр **{name}** [{type_label}] (`{target.expression}`)\n"
             f"Текст: _{text}_\n"
             f"Результат: **{'совпадение' if result else 'нет совпадения'}**"
         )
@@ -160,11 +178,16 @@ async def _cmd_test(event, args: str) -> None:
 
 async def _cmd_status(event, _args: str) -> None:
     n_chats = await storage.count_chats()
-    n_filters = await storage.count_filters()
+    fltrs = await storage.get_all_filters()
+    n_allow = sum(1 for f in fltrs if f.type == "allow")
+    n_block = sum(1 for f in fltrs if f.type == "block")
+    mode = "pass-all + block" if n_allow == 0 and n_block > 0 else "allow + block" if n_allow > 0 else "нет фильтров"
     await event.respond(
         f"**Статус userbot'а:**\n"
         f"• Чатов в мониторинге: {n_chats}\n"
-        f"• Фильтров: {n_filters}"
+        f"• Фильтров allow: {n_allow}\n"
+        f"• Фильтров block: {n_block}\n"
+        f"• Режим: {mode}"
     )
 
 
