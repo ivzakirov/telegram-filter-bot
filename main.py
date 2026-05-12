@@ -7,6 +7,8 @@ import config
 import storage
 from handlers import incoming, commands
 
+_KEEPALIVE_INTERVAL = 120  # seconds between channel pings
+
 
 def _setup_logging() -> None:
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -32,6 +34,7 @@ async def main() -> None:
         StringSession(config.SESSION_STRING),
         config.API_ID,
         config.API_HASH,
+        sequential_updates=True,
     )
 
     incoming.register(client)
@@ -57,12 +60,22 @@ async def main() -> None:
 
 
 async def _keepalive(client: TelegramClient, log: logging.Logger) -> None:
-    """Периодический пинг, чтобы сессия считалась активной и получала обновления без задержек."""
+    """
+    Пингует мониторируемые каналы, чтобы Telegram считал сессию активной и
+    слал push-обновления без задержки. Простой get_me() недостаточен — нужно
+    трогать сами каналы.
+    """
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(_KEEPALIVE_INTERVAL)
         try:
-            await client.get_me()
-            log.debug("keepalive: ok")
+            pipelines = await storage.get_all_pipelines()
+            source_ids = {p.source_id for p in pipelines}
+            for source_id in source_ids:
+                try:
+                    await client.get_messages(source_id, limit=1)
+                except Exception:
+                    log.debug("keepalive: не удалось пинговать канал %d", source_id)
+            log.debug("keepalive: пингованы каналы %s", source_ids)
         except Exception:
             log.warning("keepalive: ошибка", exc_info=True)
 
