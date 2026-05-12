@@ -18,10 +18,32 @@ def _get_lock(output_id: int) -> asyncio.Lock:
     return _output_locks[output_id]
 
 
+# Service message batching: suppress repetitive labels
+_BATCH_SIZE = 20
+# pipeline_id → (last_filter_label, count_since_last_service_msg)
+_pipeline_batch: dict[int, tuple[str, int]] = {}
+
+
+def _should_send_label(pipeline_id: int, filter_label: str) -> bool:
+    state = _pipeline_batch.get(pipeline_id)
+    if state is None:
+        _pipeline_batch[pipeline_id] = (filter_label, 1)
+        return True
+    last_label, count = state
+    if last_label != filter_label:
+        _pipeline_batch[pipeline_id] = (filter_label, 1)
+        return True
+    if count >= _BATCH_SIZE:
+        _pipeline_batch[pipeline_id] = (filter_label, 1)
+        return True
+    _pipeline_batch[pipeline_id] = (filter_label, count + 1)
+    return False
+
+
 # Media group (album) accumulation
 # grouped_id → list of message IDs
 _pending_groups: dict[int, list[int]] = {}
-# grouped_id → list of (output_id, source_title, filter_label, client)
+# grouped_id → list of (output_id, source_id, source_title, filter_label, pipeline_id, client)
 _group_destinations: dict[int, list[tuple]] = {}
 
 
@@ -32,6 +54,7 @@ async def _send_to_output(
     source_id: int,
     source_title: str,
     filter_label: str,
+    pipeline_id: int,
     text_fallback: str = "",
 ) -> None:
     """Forward message(s) to output_id and send a label. Serialised per output_id."""
@@ -53,11 +76,13 @@ async def _send_to_output(
             await client.forward_messages(output_id, messages=ids, from_peer=source_id)
             forwarded = True
 
-        prefix = "📌" if forwarded else "⚠️ (пересылка запрещена)"
-        label_msg = f"{prefix} {source_title} — {filter_label}"
-        if not forwarded and text_fallback:
-            label_msg += f"\n\n{text_fallback[:200]}"
-        await client.send_message(output_id, label_msg)
+        if not forwarded:
+            label_msg = f"⚠️ (пересылка запрещена) {source_title} — {filter_label}"
+            if text_fallback:
+                label_msg += f"\n\n{text_fallback[:200]}"
+            await client.send_message(output_id, label_msg)
+        elif _should_send_label(pipeline_id, filter_label):
+            await client.send_message(output_id, f"📌 {source_title} — {filter_label}")
 
 
 async def _flush_group(grouped_id: int) -> None:
@@ -67,9 +92,9 @@ async def _flush_group(grouped_id: int) -> None:
     destinations = _group_destinations.pop(grouped_id, [])
     if not msg_ids or not destinations:
         return
-    for output_id, source_id, source_title, filter_label, client in destinations:
+    for output_id, source_id, source_title, filter_label, pipeline_id, client in destinations:
         try:
-            await _send_to_output(client, output_id, msg_ids, source_id, source_title, filter_label)
+            await _send_to_output(client, output_id, msg_ids, source_id, source_title, filter_label, pipeline_id)
         except Exception:
             log.exception("Ошибка при пересылке альбома grouped_id=%d output=%d", grouped_id, output_id)
 
@@ -112,7 +137,8 @@ async def _handle(event: events.NewMessage.Event) -> None:
                         filter_label = f"фильтры: {', '.join(matched)}"
                     destinations.append((
                         pipeline.output_id, source_id,
-                        pipeline.source_title, filter_label, event.client,
+                        pipeline.source_title, filter_label,
+                        pipeline.id, event.client,
                     ))
                     log.info("Совпадение (альбом): pipeline=%s msg=%d %s",
                              pipeline.name, event.message.id, filter_label)
@@ -131,7 +157,8 @@ async def _handle(event: events.NewMessage.Event) -> None:
             try:
                 await _send_to_output(
                     event.client, pipeline.output_id, event.message.id,
-                    source_id, pipeline.source_title, filter_label, text,
+                    source_id, pipeline.source_title, filter_label,
+                    pipeline.id, text,
                 )
             except Exception:
                 log.exception("Ошибка пересылки: pipeline=%s msg=%d",
