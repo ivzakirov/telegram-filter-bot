@@ -1,13 +1,14 @@
 from __future__ import annotations
 import logging
 from telethon import events
+import config
 import service
 import storage
 
 log = logging.getLogger(__name__)
 
 _HELP = """
-**Команды userbot'а** (отправлять в Saved Messages):
+**Команды userbot'а** (Saved Messages или личные сообщения от доверенного аккаунта):
 
 `.add_pipeline <name> <source> <output>` — создать пайплайн
 `.remove_pipeline <name>` — удалить пайплайн и все его фильтры
@@ -257,6 +258,8 @@ async def _handle(event: events.NewMessage.Event) -> None:
     if handler is None:
         return
 
+    who = "self" if event.out else f"trusted:{event.sender_id}"
+    log.info("Команда [%s] .%s %s", who, cmd, args[:80])
     try:
         await handler(event, args)
     except Exception as e:
@@ -264,11 +267,16 @@ async def _handle(event: events.NewMessage.Event) -> None:
         await event.respond(f"❌ Внутренняя ошибка: {e}")
 
 
+def _is_command_event(e) -> bool:
+    if not (e.is_private and (e.raw_text or "").startswith(".")):
+        return False
+    if e.out:
+        return True
+    return bool(config.TRUSTED_USERS and e.sender_id in config.TRUSTED_USERS)
+
+
 def register(client) -> None:
     client.add_event_handler(
         _handle,
-        events.NewMessage(
-            outgoing=True,
-            func=lambda e: e.is_private and (e.raw_text or "").startswith("."),
-        ),
+        events.NewMessage(func=_is_command_event),
     )
