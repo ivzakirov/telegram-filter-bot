@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from typing import Optional
 from telethon import events
 from telethon.errors import FloodWaitError, ChatForwardsRestrictedError
 import service
@@ -40,6 +41,41 @@ def _should_send_label(pipeline_id: int, filter_label: str) -> bool:
     return False
 
 
+# Reply chain tracking: source msg IDs → output msg IDs per pipeline
+_msg_id_map: dict[int, dict[int, int]] = {}
+_MSG_MAP_MAXSIZE = 500
+
+
+def _store_msg_mapping(pipeline_id: int, source_ids: list[int], forwarded_msgs) -> None:
+    mapping = _msg_id_map.setdefault(pipeline_id, {})
+    for src_id, out_msg in zip(source_ids, forwarded_msgs):
+        mapping[src_id] = out_msg.id
+    if len(mapping) > _MSG_MAP_MAXSIZE:
+        excess = len(mapping) - _MSG_MAP_MAXSIZE
+        for key in list(mapping.keys())[:excess]:
+            del mapping[key]
+
+
+async def _copy_as_reply(client, output_id: int, msg, reply_to_output_id: int, sender_name: str):
+    """Send msg content as a reply to reply_to_output_id (copy-forward, preserves reply chain)."""
+    prefix = f"**{sender_name}:** " if sender_name else ""
+    if msg.media:
+        caption = prefix + (msg.message or "")
+        return await client.send_file(
+            output_id, msg.media,
+            caption=caption or None,
+            reply_to=reply_to_output_id,
+            parse_mode="md",
+        )
+    else:
+        return await client.send_message(
+            output_id,
+            prefix + (msg.message or ""),
+            reply_to=reply_to_output_id,
+            parse_mode="md",
+        )
+
+
 # Media group (album) accumulation
 # grouped_id → list of message IDs
 _pending_groups: dict[int, list[int]] = {}
@@ -56,25 +92,49 @@ async def _send_to_output(
     filter_label: str,
     pipeline_id: int,
     text_fallback: str = "",
+    message=None,
+    reply_to_source_id: Optional[int] = None,
+    sender_name: str = "",
 ) -> None:
     """Forward message(s) to output_id and send a label. Serialised per output_id."""
     ids = msg_ids if isinstance(msg_ids, list) else [msg_ids]
     is_album = isinstance(msg_ids, list)
 
     async with _get_lock(output_id):
+        output_reply_id: Optional[int] = None
+        if reply_to_source_id is not None:
+            output_reply_id = _msg_id_map.get(pipeline_id, {}).get(reply_to_source_id)
+
         forwarded = False
-        try:
-            await client.forward_messages(output_id, messages=ids, from_peer=source_id)
-            forwarded = True
-            log.info("Переслано%s: msgs=%s source=%d → output=%d",
-                     " (альбом)" if is_album else "", ids, source_id, output_id)
-        except ChatForwardsRestrictedError:
-            log.warning("Пересылка запрещена в чате %d", source_id)
-        except FloodWaitError as e:
-            log.warning("FloodWait %ds при пересылке", e.seconds)
-            await asyncio.sleep(e.seconds)
-            await client.forward_messages(output_id, messages=ids, from_peer=source_id)
-            forwarded = True
+
+        # Copy-forward as reply when the replied-to message is already in output
+        if output_reply_id and message and not is_album:
+            try:
+                out_msg = await _copy_as_reply(client, output_id, message, output_reply_id, sender_name)
+                _store_msg_mapping(pipeline_id, [message.id], [out_msg])
+                forwarded = True
+                log.info("Скопировано как ответ: msg=%d → reply_to=%d output=%d",
+                         message.id, output_reply_id, output_id)
+            except Exception:
+                log.warning("Ошибка copy-as-reply, откат к forward", exc_info=True)
+
+        if not forwarded:
+            try:
+                result = await client.forward_messages(output_id, messages=ids, from_peer=source_id)
+                result_list = result if isinstance(result, list) else [result]
+                _store_msg_mapping(pipeline_id, ids, result_list)
+                forwarded = True
+                log.info("Переслано%s: msgs=%s source=%d → output=%d",
+                         " (альбом)" if is_album else "", ids, source_id, output_id)
+            except ChatForwardsRestrictedError:
+                log.warning("Пересылка запрещена в чате %d", source_id)
+            except FloodWaitError as e:
+                log.warning("FloodWait %ds при пересылке", e.seconds)
+                await asyncio.sleep(e.seconds)
+                result = await client.forward_messages(output_id, messages=ids, from_peer=source_id)
+                result_list = result if isinstance(result, list) else [result]
+                _store_msg_mapping(pipeline_id, ids, result_list)
+                forwarded = True
 
         if not forwarded:
             label_msg = f"⚠️ (пересылка запрещена) {source_title} — {filter_label}"
@@ -114,21 +174,28 @@ async def _handle(event: events.NewMessage.Event) -> None:
 
         sender = await event.get_sender()
         if sender:
-            author = getattr(sender, "username", None) or str(getattr(sender, "id", ""))
+            username = getattr(sender, "username", None)
+            first_name = getattr(sender, "first_name", None) or getattr(sender, "title", None)
+            author = username or str(getattr(sender, "id", ""))
+            sender_name = (f"@{username}" if username else first_name or author)
         else:
             author = ""
+            sender_name = ""
 
         results = await service.get_matching_pipelines(source_id, text, author)
         log.debug("Пайплайны: source=%s matched=%d/%d", source_id, len(results), len(pipelines))
         if not results:
             return
 
+        reply_to_source_id: Optional[int] = None
+        if event.message.reply_to:
+            reply_to_source_id = event.message.reply_to.reply_to_msg_id
+
         # Grouped message (album): accumulate IDs, flush after 1s
         grouped_id = event.message.grouped_id
         if grouped_id:
             _pending_groups.setdefault(grouped_id, []).append(event.message.id)
             if grouped_id not in _group_destinations:
-                # Destinations determined by first photo; all photos in group share same filters
                 destinations = []
                 for pipeline, matched in results:
                     if matched == ["*"]:
@@ -159,6 +226,9 @@ async def _handle(event: events.NewMessage.Event) -> None:
                     event.client, pipeline.output_id, event.message.id,
                     source_id, pipeline.source_title, filter_label,
                     pipeline.id, text,
+                    message=event.message,
+                    reply_to_source_id=reply_to_source_id,
+                    sender_name=sender_name,
                 )
             except Exception:
                 log.exception("Ошибка пересылки: pipeline=%s msg=%d",
