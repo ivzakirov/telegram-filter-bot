@@ -51,7 +51,7 @@ Fill in `API_ID` and `API_HASH` in `.env`. Leave `SESSION_STRING` empty for now.
 myvenv/bin/python gen_session.py
 ```
 
-Follow the prompts (phone number + confirmation code), then copy the printed string into `SESSION_STRING=` in `.env`.
+`API_ID` and `API_HASH` are read from `.env` automatically. Enter your phone number and the confirmation code when prompted, then copy the printed string into `SESSION_STRING=` in `.env`.
 
 **5. Run**
 
