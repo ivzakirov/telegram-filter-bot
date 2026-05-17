@@ -58,6 +58,13 @@ async def init_db() -> None:
                 UNIQUE(pipeline_id, name)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS channel_watermarks (
+                source_id   INTEGER PRIMARY KEY,
+                last_msg_id INTEGER NOT NULL DEFAULT 0,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.execute("PRAGMA foreign_keys = ON")
         await db.commit()
 
@@ -224,6 +231,28 @@ async def delete_filter(pipeline_id: int, name: str) -> bool:
         )
         await db.commit()
     return True
+
+
+async def get_watermark(source_id: int) -> int:
+    """Returns last processed msg_id for source_id (0 if not set)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT last_msg_id FROM channel_watermarks WHERE source_id = ?", (source_id,)
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+async def set_watermark(source_id: int, last_msg_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO channel_watermarks (source_id, last_msg_id) VALUES (?, ?)"
+            " ON CONFLICT(source_id) DO UPDATE SET last_msg_id = excluded.last_msg_id,"
+            " updated_at = CURRENT_TIMESTAMP"
+            " WHERE excluded.last_msg_id > last_msg_id",
+            (source_id, last_msg_id),
+        )
+        await db.commit()
 
 
 async def count_filters_for_pipeline(pipeline_id: int) -> tuple[int, int]:

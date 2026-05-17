@@ -11,35 +11,24 @@ log = logging.getLogger(__name__)
 
 def _eval_filters(filters: list[Filter], text: str, author: str) -> list[str]:
     """
-    Core allow/block logic for a single pipeline's filter set.
+    Sequential first-match evaluation (like iptables rules).
 
-    Returns:
-      []    — blocked or no allow-filter matched
-      ["*"] — pass-all (no allow-filters, no block triggered)
-      [names...] — matched allow-filter names
+    Filters are checked in insertion order; the first matching filter wins:
+      block match → return []       (blocked)
+      allow match → return [name]   (forward)
+    No filter matched → return ["*"] (pass-all)
     """
-    allow_filters = [f for f in filters if f.type == "allow"]
-    block_filters = [f for f in filters if f.type == "block"]
-
-    for f in block_filters:
+    for f in filters:
         try:
             if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text, author):
-                log.debug("Blocked by filter '%s' (pipeline %d)", f.name, f.pipeline_id)
-                return []
+                if f.type == "block":
+                    log.debug("Заблокировано фильтром '%s' (pipeline %d)", f.name, f.pipeline_id)
+                    return []
+                return [f.name]
         except Exception:
-            log.warning("Ошибка в block-фильтре '%s'", f.name, exc_info=True)
+            log.warning("Ошибка в фильтре '%s'", f.name, exc_info=True)
 
-    if allow_filters:
-        matched = []
-        for f in allow_filters:
-            try:
-                if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text, author):
-                    matched.append(f.name)
-            except Exception:
-                log.warning("Ошибка в allow-фильтре '%s'", f.name, exc_info=True)
-        return matched
-
-    return ["*"]  # pass-all mode
+    return ["*"]  # no filter matched → pass-all
 
 
 async def get_matching_pipelines(

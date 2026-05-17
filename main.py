@@ -55,27 +55,25 @@ async def main() -> None:
             "Начните с .help"
         )
 
+        log.info("Catchup пропущенных сообщений…")
+        await incoming.catchup(client)
+        log.info("Catchup завершён")
+
         asyncio.create_task(_keepalive(client, log))
         await client.run_until_disconnected()
 
 
 async def _keepalive(client: TelegramClient, log: logging.Logger) -> None:
     """
-    Пингует мониторируемые каналы, чтобы Telegram считал сессию активной и
-    слал push-обновления без задержки. Простой get_me() недостаточен — нужно
-    трогать сами каналы.
+    Периодически запускает catchup: забирает пропущенные сообщения по ватермарке
+    и одновременно пингует каналы (get_messages держит сессию активной).
+    Покрывает сценарий сна/пробуждения компьютера без перезапуска бота.
     """
     while True:
         await asyncio.sleep(_KEEPALIVE_INTERVAL)
         try:
-            pipelines = await storage.get_all_pipelines()
-            source_ids = {p.source_id for p in pipelines}
-            for source_id in source_ids:
-                try:
-                    await client.get_messages(source_id, limit=1)
-                except Exception:
-                    log.debug("keepalive: не удалось пинговать канал %d", source_id)
-            log.debug("keepalive: пингованы каналы %s", source_ids)
+            await incoming.catchup(client)
+            log.debug("keepalive: catchup завершён")
         except Exception:
             log.warning("keepalive: ошибка", exc_info=True)
 
