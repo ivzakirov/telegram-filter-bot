@@ -30,13 +30,12 @@ Filters are checked in insertion order — the first match wins (like iptables r
 
 Go to [my.telegram.org](https://my.telegram.org), create an app, copy `API_ID` and `API_HASH`.
 
-**2. Generate a session string**
+**2. Install dependencies**
 
 ```bash
-python gen_session.py
+python -m venv myvenv
+myvenv/bin/pip install -r requirements.txt
 ```
-
-Follow the prompts (phone number + confirmation code). Copy the printed string.
 
 **3. Configure environment**
 
@@ -44,24 +43,15 @@ Follow the prompts (phone number + confirmation code). Copy the printed string.
 cp .env.example .env
 ```
 
-Edit `.env`:
+Fill in `API_ID` and `API_HASH` in `.env`. Leave `SESSION_STRING` empty for now.
 
-```env
-API_ID=12345678
-API_HASH=your_api_hash_here
-SESSION_STRING=your_session_string_here
-
-# Optional
-DB_PATH=filters.db
-TRUSTED_USERS=123456789,987654321
-```
-
-**4. Install dependencies**
+**4. Generate a session string**
 
 ```bash
-python -m venv myvenv
-myvenv/bin/pip install -r requirements.txt
+myvenv/bin/python gen_session.py
 ```
+
+Follow the prompts (phone number + confirmation code), then copy the printed string into `SESSION_STRING=` in `.env`.
 
 **5. Run**
 
