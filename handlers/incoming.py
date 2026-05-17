@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 from telethon import events
 from telethon.errors import FloodWaitError, ChatForwardsRestrictedError
+from telethon.tl.types import MessageMediaWebPage
 import service
 import storage
 
@@ -72,7 +73,7 @@ def _store_msg_mapping(pipeline_id: int, source_ids: list[int], forwarded_msgs) 
 async def _copy_as_reply(client, output_id: int, msg, reply_to_output_id: int, sender_name: str):
     """Send msg content as a reply to reply_to_output_id (copy-forward, preserves reply chain)."""
     prefix = f"**{sender_name}:** " if sender_name else ""
-    if msg.media:
+    if msg.media and not isinstance(msg.media, MessageMediaWebPage):
         caption = prefix + (msg.message or "")
         return await client.send_file(
             output_id, msg.media,
@@ -128,8 +129,8 @@ async def _send_to_output(
                 forwarded = True
                 log.info("Скопировано как ответ: msg=%d → reply_to=%d output=%d",
                          message.id, output_reply_id, output_id)
-            except Exception:
-                log.warning("Ошибка copy-as-reply, откат к forward", exc_info=True)
+            except Exception as e:
+                log.warning("Ошибка copy-as-reply, откат к forward: %s", e)
 
         if not forwarded:
             try:
