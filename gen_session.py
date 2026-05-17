@@ -1,11 +1,11 @@
 """
-Одноразовый скрипт для генерации SESSION_STRING.
+One-time script to generate a SESSION_STRING.
 
-Запуск:
+Usage:
     python gen_session.py
 
-Скрипт запросит API_ID, API_HASH, номер телефона и код подтверждения,
-затем напечатает строку сессии. Скопируйте её в .env как SESSION_STRING=...
+The script will prompt for API_ID, API_HASH, phone number and confirmation code,
+then print the session string. Copy it into .env as SESSION_STRING=...
 """
 import asyncio
 from telethon import TelegramClient
@@ -13,15 +13,15 @@ from telethon.sessions import StringSession
 
 
 async def main() -> None:
-    print("=== Генерация session string для Telegram userbot ===\n")
-    api_id = int(input("API_ID (число с my.telegram.org): ").strip())
-    api_hash = input("API_HASH (строка с my.telegram.org): ").strip()
+    print("=== Telegram userbot session string generator ===\n")
+    api_id = int(input("API_ID (from my.telegram.org): ").strip())
+    api_hash = input("API_HASH (from my.telegram.org): ").strip()
 
     async with TelegramClient(StringSession(), api_id, api_hash) as client:
         session_string = client.session.save()
 
     print("\n" + "=" * 60)
-    print("SESSION_STRING (скопируйте в .env):")
+    print("SESSION_STRING (copy into .env):")
     print(session_string)
     print("=" * 60)
 

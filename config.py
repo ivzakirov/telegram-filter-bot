@@ -6,7 +6,7 @@ load_dotenv()
 def _require(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise RuntimeError(f"Обязательная переменная окружения не задана: {name}")
+        raise RuntimeError(f"Required environment variable not set: {name}")
     return value
 
 API_ID: int = int(_require("API_ID"))

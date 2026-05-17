@@ -7,7 +7,7 @@ import config
 import storage
 from handlers import incoming, commands
 
-_KEEPALIVE_INTERVAL = 120  # seconds between channel pings
+_KEEPALIVE_INTERVAL = 120  # seconds between catchup runs
 
 
 def _setup_logging() -> None:
@@ -28,7 +28,7 @@ async def main() -> None:
     log = logging.getLogger(__name__)
 
     await storage.init_db()
-    log.info("База данных инициализирована: %s", config.DB_PATH)
+    log.info("Database initialized: %s", config.DB_PATH)
 
     client = TelegramClient(
         StringSession(config.SESSION_STRING),
@@ -42,22 +42,22 @@ async def main() -> None:
 
     async with client:
         me = await client.get_me()
-        log.info("Авторизован как: %s (id=%d)", me.username or me.first_name, me.id)
+        log.info("Authorized as: %s (id=%d)", me.username or me.first_name, me.id)
 
-        log.info("Синхронизация диалогов…")
+        log.info("Syncing dialogs…")
         count = 0
         async for _ in client.iter_dialogs():
             count += 1
-        log.info("Синхронизировано диалогов: %d", count)
+        log.info("Dialogs synced: %d", count)
 
         log.info(
-            "Управление: отправляйте команды с префиксом '.' в Saved Messages. "
-            "Начните с .help"
+            "Management: send commands with '.' prefix to Saved Messages. "
+            "Start with .help"
         )
 
-        log.info("Catchup пропущенных сообщений…")
+        log.info("Catching up missed messages…")
         await incoming.catchup(client)
-        log.info("Catchup завершён")
+        log.info("Catchup complete")
 
         asyncio.create_task(_keepalive(client, log))
         await client.run_until_disconnected()
@@ -65,17 +65,17 @@ async def main() -> None:
 
 async def _keepalive(client: TelegramClient, log: logging.Logger) -> None:
     """
-    Периодически запускает catchup: забирает пропущенные сообщения по ватермарке
-    и одновременно пингует каналы (get_messages держит сессию активной).
-    Покрывает сценарий сна/пробуждения компьютера без перезапуска бота.
+    Periodically runs catchup: fetches missed messages by watermark
+    and pings channels to keep the session alive.
+    Covers sleep/wake scenarios without restarting the bot.
     """
     while True:
         await asyncio.sleep(_KEEPALIVE_INTERVAL)
         try:
             await incoming.catchup(client)
-            log.debug("keepalive: catchup завершён")
+            log.debug("keepalive: catchup complete")
         except Exception:
-            log.warning("keepalive: ошибка", exc_info=True)
+            log.warning("keepalive: error", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -127,10 +127,10 @@ async def _send_to_output(
                 out_msg = await _copy_as_reply(client, output_id, message, output_reply_id, sender_name)
                 _store_msg_mapping(pipeline_id, [message.id], [out_msg])
                 forwarded = True
-                log.info("Скопировано как ответ: msg=%d → reply_to=%d output=%d",
+                log.info("Copied as reply: msg=%d → reply_to=%d output=%d",
                          message.id, output_reply_id, output_id)
             except Exception as e:
-                log.warning("Ошибка copy-as-reply, откат к forward: %s", e)
+                log.warning("copy-as-reply failed, falling back to forward: %s", e)
 
         if not forwarded:
             try:
@@ -138,12 +138,12 @@ async def _send_to_output(
                 result_list = result if isinstance(result, list) else [result]
                 _store_msg_mapping(pipeline_id, ids, result_list)
                 forwarded = True
-                log.info("Переслано%s: msgs=%s source=%d → output=%d",
-                         " (альбом)" if is_album else "", ids, source_id, output_id)
+                log.info("Forwarded%s: msgs=%s source=%d → output=%d",
+                         " (album)" if is_album else "", ids, source_id, output_id)
             except ChatForwardsRestrictedError:
-                log.warning("Пересылка запрещена в чате %d", source_id)
+                log.warning("Forwarding restricted in chat %d", source_id)
             except FloodWaitError as e:
-                log.warning("FloodWait %ds при пересылке", e.seconds)
+                log.warning("FloodWait %ds while forwarding", e.seconds)
                 await asyncio.sleep(e.seconds)
                 result = await client.forward_messages(output_id, messages=ids, from_peer=source_id)
                 result_list = result if isinstance(result, list) else [result]
@@ -151,7 +151,7 @@ async def _send_to_output(
                 forwarded = True
 
         if not forwarded:
-            label_msg = f"⚠️ (пересылка запрещена) {source_title} — {filter_label}"
+            label_msg = f"⚠️ (forwarding restricted) {source_title} — {filter_label}"
             if text_fallback:
                 label_msg += f"\n\n{text_fallback[:200]}"
             await client.send_message(output_id, label_msg)
@@ -170,7 +170,7 @@ async def _flush_group(grouped_id: int) -> None:
         try:
             await _send_to_output(client, output_id, msg_ids, source_id, source_title, filter_label, pipeline_id)
         except Exception:
-            log.exception("Ошибка при пересылке альбома grouped_id=%d output=%d", grouped_id, output_id)
+            log.exception("Error forwarding album grouped_id=%d output=%d", grouped_id, output_id)
 
 
 async def _handle(event: events.NewMessage.Event) -> None:
@@ -183,20 +183,20 @@ async def _handle(event: events.NewMessage.Event) -> None:
             await _handle_inner(event, source_id)
 
     except Exception:
-        log.exception("Ошибка в incoming handler: chat=%d", event.chat_id)
+        log.exception("Error in incoming handler: chat=%d", event.chat_id)
 
 
 async def _handle_inner(event: events.NewMessage.Event, source_id: int) -> None:
     # Skip if catchup already processed this message (or Telegram delivered it twice)
     current_wm = await storage.get_watermark(source_id)
     if event.message.id <= current_wm:
-        log.debug("Пропуск дубля: source=%d msg=%d watermark=%d",
+        log.debug("Skipping duplicate: source=%d msg=%d watermark=%d",
                   source_id, event.message.id, current_wm)
         return
 
     pipelines = await storage.get_pipelines_for_source(source_id)
     if not pipelines:
-        log.debug("Нет пайплайнов для chat=%s", source_id)
+        log.debug("No pipelines for chat=%s", source_id)
         return
 
     text: str = event.raw_text or ""
@@ -212,7 +212,7 @@ async def _handle_inner(event: events.NewMessage.Event, source_id: int) -> None:
         sender_name = ""
 
     results = await service.get_matching_pipelines(source_id, text, author)
-    log.debug("Пайплайны: source=%s matched=%d/%d", source_id, len(results), len(pipelines))
+    log.debug("Pipelines: source=%s matched=%d/%d", source_id, len(results), len(pipelines))
     if not results:
         await storage.set_watermark(source_id, event.message.id)
         return
@@ -229,15 +229,15 @@ async def _handle_inner(event: events.NewMessage.Event, source_id: int) -> None:
             destinations = []
             for pipeline, matched in results:
                 if matched == ["*"]:
-                    filter_label = "проходит все"
+                    filter_label = "pass-all"
                 else:
-                    filter_label = f"фильтры: {', '.join(matched)}"
+                    filter_label = f"filters: {', '.join(matched)}"
                 destinations.append((
                     pipeline.output_id, source_id,
                     pipeline.source_title, filter_label,
                     pipeline.id, event.client,
                 ))
-                log.info("Совпадение (альбом): pipeline=%s msg=%d %s",
+                log.info("Match (album): pipeline=%s msg=%d %s",
                          pipeline.name, event.message.id, filter_label)
             _group_destinations[grouped_id] = destinations
             asyncio.create_task(_flush_group(grouped_id))
@@ -247,10 +247,10 @@ async def _handle_inner(event: events.NewMessage.Event, source_id: int) -> None:
     # Single message: forward to each matched pipeline's output
     for pipeline, matched in results:
         if matched == ["*"]:
-            filter_label = "проходит все"
+            filter_label = "pass-all"
         else:
-            filter_label = f"фильтры: {', '.join(matched)}"
-        log.info("Совпадение: pipeline=%s msg=%d %s",
+            filter_label = f"filters: {', '.join(matched)}"
+        log.info("Match: pipeline=%s msg=%d %s",
                  pipeline.name, event.message.id, filter_label)
         try:
             await _send_to_output(
@@ -262,7 +262,7 @@ async def _handle_inner(event: events.NewMessage.Event, source_id: int) -> None:
                 sender_name=sender_name,
             )
         except Exception:
-            log.exception("Ошибка пересылки: pipeline=%s msg=%d",
+            log.exception("Forward error: pipeline=%s msg=%d",
                           pipeline.name, event.message.id)
 
     await storage.set_watermark(source_id, event.message.id)
@@ -297,8 +297,8 @@ async def _catchup_process(client, source_id: int, msgs: list) -> None:
     msg_ids = [m.id for m in msgs] if is_album else msg.id
 
     for pipeline, matched in results:
-        filter_label = "проходит все" if matched == ["*"] else f"фильтры: {', '.join(matched)}"
-        log.info("Catchup совпадение: pipeline=%s msg=%d %s", pipeline.name, msg.id, filter_label)
+        filter_label = "pass-all" if matched == ["*"] else f"filters: {', '.join(matched)}"
+        log.info("Catchup match: pipeline=%s msg=%d %s", pipeline.name, msg.id, filter_label)
         try:
             await _send_to_output(
                 client, pipeline.output_id, msg_ids,
@@ -309,7 +309,7 @@ async def _catchup_process(client, source_id: int, msgs: list) -> None:
                 sender_name=sender_name,
             )
         except Exception:
-            log.exception("Catchup: ошибка пересылки pipeline=%s msg=%d", pipeline.name, msg.id)
+            log.exception("Catchup: forward error pipeline=%s msg=%d", pipeline.name, msg.id)
 
 
 async def catchup(client) -> None:
@@ -332,25 +332,25 @@ async def _catchup_source(client, source_id: int) -> None:
                 await storage.set_watermark(source_id, msgs[0].id)
                 log.info("Catchup init: source=%d watermark=%d", source_id, msgs[0].id)
         except Exception:
-            log.warning("Catchup: не удалось получить последнее сообщение source=%d",
+            log.warning("Catchup: failed to get last message for source=%d",
                         source_id, exc_info=True)
         return
 
     try:
         missed = await client.get_messages(source_id, min_id=watermark, limit=_CATCHUP_LIMIT)
     except Exception:
-        log.warning("Catchup: не удалось получить сообщения source=%d", source_id, exc_info=True)
+        log.warning("Catchup: failed to get messages for source=%d", source_id, exc_info=True)
         return
 
     if not missed:
-        log.debug("Catchup: source=%d — нет пропущенных", source_id)
+        log.debug("Catchup: source=%d — no missed messages", source_id)
         return
 
     missed = list(reversed(missed))
-    log.info("Catchup: source=%d — %d пропущенных (watermark=%d)",
+    log.info("Catchup: source=%d — %d missed (watermark=%d)",
              source_id, len(missed), watermark)
     if len(missed) == _CATCHUP_LIMIT:
-        log.warning("Catchup: source=%d — достигнут лимит %d, часть могла быть пропущена",
+        log.warning("Catchup: source=%d — limit %d reached, some messages may have been missed",
                     source_id, _CATCHUP_LIMIT)
 
     processed_groups: set[int] = set()
@@ -364,7 +364,7 @@ async def _catchup_source(client, source_id: int) -> None:
             else:
                 await _catchup_process(client, source_id, [msg])
         except Exception:
-            log.exception("Catchup: ошибка msg=%d source=%d", msg.id, source_id)
+            log.exception("Catchup: error msg=%d source=%d", msg.id, source_id)
         await storage.set_watermark(source_id, msg.id)
 
 

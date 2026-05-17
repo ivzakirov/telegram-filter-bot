@@ -45,7 +45,7 @@ def _tokenize(text: str) -> list[_Token]:
             while j < len(text) and text[j] != '"':
                 j += 1
             if j >= len(text):
-                raise SyntaxError("Незакрытая кавычка в выражении")
+                raise SyntaxError("Unclosed quote in expression")
             tokens.append(_Token(_TT.TERM, text[i + 1 : j], "substr"))
             i = j + 1
         elif ch == "/":
@@ -57,13 +57,13 @@ def _tokenize(text: str) -> list[_Token]:
                 else:
                     j += 1
             if j >= len(text):
-                raise SyntaxError("Незакрытый regex-паттерн (нет закрывающего '/')")
+                raise SyntaxError("Unclosed regex pattern (missing closing '/')")
             pattern = text[i + 1 : j]
             # Validate regex at parse time
             try:
                 _re.compile(pattern)
             except _re.error as e:
-                raise SyntaxError(f"Некорректный regex '{pattern}': {e}") from e
+                raise SyntaxError(f"Invalid regex '{pattern}': {e}") from e
             tokens.append(_Token(_TT.TERM, pattern, "regex"))
             i = j + 1
         else:
@@ -80,7 +80,7 @@ def _tokenize(text: str) -> list[_Token]:
                 tokens.append(_Token(_TT.NOT))
             elif word.startswith("@"):
                 if len(word) < 2:
-                    raise SyntaxError("Пустой @username в выражении")
+                    raise SyntaxError("Empty @username in expression")
                 tokens.append(_Token(_TT.TERM, word[1:], "author"))
             elif word:
                 mode = "glob" if ("*" in word or "?" in word) else "substr"
@@ -132,7 +132,7 @@ class _Parser:
         tok = self._tokens[self._pos]
         if expected is not None and tok.type != expected:
             raise SyntaxError(
-                f"Ожидалось {expected.name}, получено {tok.type.name}"
+                f"Expected {expected.name}, got {tok.type.name}"
                 + (f" ({tok.value!r})" if tok.value else "")
             )
         self._pos += 1
@@ -140,10 +140,10 @@ class _Parser:
 
     def parse(self) -> Node:
         if self._peek().type == _TT.EOF:
-            raise SyntaxError("Пустое выражение")
+            raise SyntaxError("Empty expression")
         node = self._parse_or()
         if self._peek().type != _TT.EOF:
-            raise SyntaxError(f"Неожиданный токен: {self._peek().value!r}")
+            raise SyntaxError(f"Unexpected token: {self._peek().value!r}")
         return node
 
     def _parse_or(self) -> Node:
@@ -179,7 +179,7 @@ class _Parser:
             self._consume(_TT.TERM)
             return TermNode(tok.value, tok.mode)
         raise SyntaxError(
-            f"Ожидалось слово, паттерн или '(', получено "
+            f"Expected word, pattern or '(', got "
             + (f"{tok.value!r}" if tok.value else tok.type.name)
         )
 

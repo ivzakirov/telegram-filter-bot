@@ -8,37 +8,37 @@ import storage
 log = logging.getLogger(__name__)
 
 _HELP = """
-**Команды userbot'а** (Saved Messages или личные сообщения от доверенного аккаунта):
+**Userbot commands** (Saved Messages or DMs from a trusted account):
 
-`.add_pipeline <name> <source> <output>` — создать пайплайн
-`.remove_pipeline <name>` — удалить пайплайн и все его фильтры
-`.list_pipelines` — список пайплайнов
+`.add_pipeline <name> <source> <output>` — create a pipeline
+`.remove_pipeline <name>` — delete a pipeline and all its filters
+`.list_pipelines` — list all pipelines
 
-`.add_filter <pipeline> [allow|block] <name> <выражение>` — добавить фильтр
-`.remove_filter <pipeline> <name>` — удалить фильтр
-`.list_filters <pipeline>` — фильтры пайплайна
-`.test <pipeline> <имя> <текст> [--from @user]` — проверить фильтр
+`.add_filter <pipeline> [allow|block] <name> <expression>` — add a filter
+`.remove_filter <pipeline> <name>` — delete a filter
+`.list_filters <pipeline>` — list filters for a pipeline
+`.test <pipeline> <name> <text> [--from @user]` — test a filter
 
-`.status` — сводка
-`.help` — эта справка
+`.status` — summary
+`.help` — this help
 
-**Аргументы:**
-• `<source>` и `<output>` — @username или числовой chat_id
-• `allow` (по умолчанию) — переслать если совпадает, следующие фильтры не проверяются
-• `block` — заблокировать если совпадает, следующие фильтры не проверяются
-Фильтры проверяются **по порядку**, первое совпадение определяет результат.
-Если ни один не сработал — сообщение проходит (добавьте `block *` последним чтобы блокировать остальное).
+**Arguments:**
+• `<source>` and `<output>` — @username or numeric chat_id
+• `allow` (default) — forward if matched, no further filters checked
+• `block` — block if matched, no further filters checked
+Filters are checked **in order**, the first match determines the outcome.
+If no filter matched — message passes (add `block *` last to block the rest).
 
-**Синтаксис выражений:**
-`AND`, `OR`, `NOT`, скобки `()`, фразы в `"кавычках"`
-Wildcards: `python*`, `*реклам*`, `байк?`
-Regex: `/паттерн/` например `/py(thon|3)/`
-Автор: `@username` — совпадает с отправителем
+**Expression syntax:**
+`AND`, `OR`, `NOT`, parentheses `()`, phrases in `"quotes"`
+Wildcards: `python*`, `*spam*`, `sale?`
+Regex: `/pattern/` e.g. `/py(thon|3)/`
+Author: `@username` — matches the message sender
 
-Примеры:
+Examples:
   `.add_pipeline jobs @js_jobs -1001234567890`
-  `.add_filter jobs allow python python AND NOT вакансия`
-  `.add_filter jobs block spam реклама* OR @spambot`
+  `.add_filter jobs allow python python AND NOT vacancy`
+  `.add_filter jobs block spam ad* OR @spambot`
 """.strip()
 
 
@@ -46,8 +46,8 @@ async def _cmd_add_pipeline(event, args: str) -> None:
     parts = args.split()
     if len(parts) < 3:
         await event.respond(
-            "Использование: `.add_pipeline <name> <source> <output>`\n"
-            "Пример: `.add_pipeline jobs @js_jobs -1001234567890`"
+            "Usage: `.add_pipeline <name> <source> <output>`\n"
+            "Example: `.add_pipeline jobs @js_jobs -1001234567890`"
         )
         return
     name, source_identifier, output_identifier = parts[0], parts[1], parts[2]
@@ -55,9 +55,9 @@ async def _cmd_add_pipeline(event, args: str) -> None:
         pipeline = await service.add_pipeline(event.client, name, source_identifier, output_identifier)
         src = f"@{pipeline.source_username}" if pipeline.source_username else str(pipeline.source_id)
         await event.respond(
-            f"✅ Пайплайн **{name}** создан\n"
-            f"• Источник: {pipeline.source_title} ({src})\n"
-            f"• Выход: `{pipeline.output_id}`"
+            f"✅ Pipeline **{name}** created\n"
+            f"• Source: {pipeline.source_title} ({src})\n"
+            f"• Output: `{pipeline.output_id}`"
         )
     except Exception as e:
         await event.respond(f"❌ {e}")
@@ -66,25 +66,25 @@ async def _cmd_add_pipeline(event, args: str) -> None:
 async def _cmd_remove_pipeline(event, args: str) -> None:
     name = args.strip()
     if not name:
-        await event.respond("Использование: `.remove_pipeline <name>`")
+        await event.respond("Usage: `.remove_pipeline <name>`")
         return
     removed = await service.remove_pipeline(name)
     if removed:
-        await event.respond(f"✅ Пайплайн **{name}** удалён")
+        await event.respond(f"✅ Pipeline **{name}** deleted")
     else:
-        await event.respond(f"⚠️ Пайплайн **{name}** не найден")
+        await event.respond(f"⚠️ Pipeline **{name}** not found")
 
 
 async def _cmd_list_pipelines(event, _args: str) -> None:
     pipelines = await storage.get_all_pipelines()
     if not pipelines:
-        await event.respond("Пайплайны не созданы. Добавьте: `.add_pipeline <name> <source> <output>`")
+        await event.respond("No pipelines created. Add one: `.add_pipeline <name> <source> <output>`")
         return
-    lines = ["**Пайплайны:**"]
+    lines = ["**Pipelines:**"]
     for p in pipelines:
         src = f"@{p.source_username}" if p.source_username else str(p.source_id)
         n_allow, n_block = await storage.count_filters_for_pipeline(p.id)
-        filter_info = f"{n_allow}✅ {n_block}🚫" if (n_allow or n_block) else "нет фильтров"
+        filter_info = f"{n_allow}✅ {n_block}🚫" if (n_allow or n_block) else "no filters"
         lines.append(f"• **{p.name}**: {p.source_title} ({src}) → `{p.output_id}` [{filter_info}]")
     await event.respond("\n".join(lines))
 
@@ -93,15 +93,15 @@ async def _cmd_add_filter(event, args: str) -> None:
     parts = args.split(maxsplit=1)
     if len(parts) < 2:
         await event.respond(
-            "Использование: `.add_filter <pipeline> [allow|block] <name> <выражение>`\n"
-            "Пример: `.add_filter jobs allow python python AND NOT вакансия`"
+            "Usage: `.add_filter <pipeline> [allow|block] <name> <expression>`\n"
+            "Example: `.add_filter jobs allow python python AND NOT vacancy`"
         )
         return
 
     pipeline_name, rest = parts[0], parts[1]
     pipeline = await storage.get_pipeline_by_name(pipeline_name)
     if pipeline is None:
-        await event.respond(f"❌ Пайплайн **{pipeline_name}** не найден")
+        await event.respond(f"❌ Pipeline **{pipeline_name}** not found")
         return
 
     # Detect optional type keyword
@@ -114,7 +114,7 @@ async def _cmd_add_filter(event, args: str) -> None:
     parts2 = rest.split(maxsplit=1)
     if len(parts2) < 2:
         await event.respond(
-            "Использование: `.add_filter <pipeline> [allow|block] <name> <выражение>`"
+            "Usage: `.add_filter <pipeline> [allow|block] <name> <expression>`"
         )
         return
 
@@ -122,9 +122,9 @@ async def _cmd_add_filter(event, args: str) -> None:
     try:
         await service.add_filter(pipeline.id, name, expression, filter_type)
         icon = "🚫" if filter_type == "block" else "✅"
-        await event.respond(f"{icon} Фильтр **{name}** добавлен в пайплайн **{pipeline_name}**")
+        await event.respond(f"{icon} Filter **{name}** added to pipeline **{pipeline_name}**")
     except SyntaxError as e:
-        await event.respond(f"❌ Ошибка в выражении: {e}")
+        await event.respond(f"❌ Expression error: {e}")
     except Exception as e:
         await event.respond(f"❌ {e}")
 
@@ -132,39 +132,39 @@ async def _cmd_add_filter(event, args: str) -> None:
 async def _cmd_remove_filter(event, args: str) -> None:
     parts = args.split(maxsplit=1)
     if len(parts) < 2:
-        await event.respond("Использование: `.remove_filter <pipeline> <name>`")
+        await event.respond("Usage: `.remove_filter <pipeline> <name>`")
         return
 
     pipeline_name, filter_name = parts[0], parts[1].strip()
     pipeline = await storage.get_pipeline_by_name(pipeline_name)
     if pipeline is None:
-        await event.respond(f"❌ Пайплайн **{pipeline_name}** не найден")
+        await event.respond(f"❌ Pipeline **{pipeline_name}** not found")
         return
 
     removed = await service.remove_filter(pipeline.id, filter_name)
     if removed:
-        await event.respond(f"✅ Фильтр **{filter_name}** удалён из пайплайна **{pipeline_name}**")
+        await event.respond(f"✅ Filter **{filter_name}** deleted from pipeline **{pipeline_name}**")
     else:
-        await event.respond(f"⚠️ Фильтр **{filter_name}** не найден в пайплайне **{pipeline_name}**")
+        await event.respond(f"⚠️ Filter **{filter_name}** not found in pipeline **{pipeline_name}**")
 
 
 async def _cmd_list_filters(event, args: str) -> None:
     pipeline_name = args.strip()
     if not pipeline_name:
-        await event.respond("Использование: `.list_filters <pipeline>`")
+        await event.respond("Usage: `.list_filters <pipeline>`")
         return
 
     pipeline = await storage.get_pipeline_by_name(pipeline_name)
     if pipeline is None:
-        await event.respond(f"❌ Пайплайн **{pipeline_name}** не найден")
+        await event.respond(f"❌ Pipeline **{pipeline_name}** not found")
         return
 
     filters = await storage.get_filters_for_pipeline(pipeline.id)
     if not filters:
-        await event.respond(f"В пайплайне **{pipeline_name}** нет фильтров. Добавьте: `.add_filter {pipeline_name} <name> <выражение>`")
+        await event.respond(f"Pipeline **{pipeline_name}** has no filters. Add one: `.add_filter {pipeline_name} <name> <expression>`")
         return
 
-    lines = [f"**Фильтры пайплайна {pipeline_name}:**"]
+    lines = [f"**Filters for pipeline {pipeline_name}:**"]
     for f in filters:
         icon = "🚫" if f.type == "block" else "✅"
         lines.append(f"{icon} **{f.name}**: `{f.expression}`")
@@ -182,19 +182,19 @@ async def _cmd_test(event, args: str) -> None:
 
     parts = args.split(maxsplit=2)
     if len(parts) < 3:
-        await event.respond("Использование: `.test <pipeline> <filter_name> <текст> [--from @user]`")
+        await event.respond("Usage: `.test <pipeline> <filter_name> <text> [--from @user]`")
         return
 
     pipeline_name, filter_name, text = parts[0], parts[1], parts[2]
     pipeline = await storage.get_pipeline_by_name(pipeline_name)
     if pipeline is None:
-        await event.respond(f"❌ Пайплайн **{pipeline_name}** не найден")
+        await event.respond(f"❌ Pipeline **{pipeline_name}** not found")
         return
 
     filters = await storage.get_filters_for_pipeline(pipeline.id)
     target = next((f for f in filters if f.name == filter_name), None)
     if target is None:
-        await event.respond(f"❌ Фильтр **{filter_name}** не найден в пайплайне **{pipeline_name}**")
+        await event.respond(f"❌ Filter **{filter_name}** not found in pipeline **{pipeline_name}**")
         return
 
     try:
@@ -203,27 +203,28 @@ async def _cmd_test(event, args: str) -> None:
         result = expr_parser.evaluate(ast, text, author)
         icon = "✅" if result else "❌"
         type_label = "block" if target.type == "block" else "allow"
-        author_note = f"\nАвтор: `@{author}`" if author else ""
+        author_note = f"\nAuthor: `@{author}`" if author else ""
         await event.respond(
-            f"{icon} Фильтр **{filter_name}** [{type_label}] (`{target.expression}`)\n"
-            f"Текст: _{text}_{author_note}\n"
-            f"Результат: **{'совпадение' if result else 'нет совпадения'}**"
+            f"{icon} Filter **{filter_name}** [{type_label}] (`{target.expression}`)\n"
+            f"Text: _{text}_{author_note}\n"
+            f"Result: **{'match' if result else 'no match'}**"
         )
     except Exception as e:
-        await event.respond(f"❌ Ошибка: {e}")
+        await event.respond(f"❌ Error: {e}")
 
 
 async def _cmd_status(event, _args: str) -> None:
     pipelines = await storage.get_all_pipelines()
     if not pipelines:
-        await event.respond("Пайплайны не созданы.")
+        await event.respond("No pipelines created.")
         return
-    lines = [f"**Статус userbot'а** ({len(pipelines)} пайплайн{'а' if 2 <= len(pipelines) <= 4 else 'ов' if len(pipelines) >= 5 else ''}):\n"]
+    n = len(pipelines)
+    lines = [f"**Userbot status** ({n} pipeline{'s' if n != 1 else ''}):\n"]
     for p in pipelines:
         src = f"@{p.source_username}" if p.source_username else str(p.source_id)
         n_allow, n_block = await storage.count_filters_for_pipeline(p.id)
         if n_allow == 0 and n_block == 0:
-            mode = "нет фильтров (проходит всё)"
+            mode = "no filters (pass-all)"
         elif n_allow == 0:
             mode = f"pass-all + {n_block} block"
         else:
@@ -260,12 +261,12 @@ async def _handle(event: events.NewMessage.Event) -> None:
         return
 
     who = "self" if event.out else f"trusted:{event.sender_id}"
-    log.info("Команда [%s] .%s %s", who, cmd, args[:80])
+    log.info("Command [%s] .%s %s", who, cmd, args[:80])
     try:
         await handler(event, args)
     except Exception as e:
-        log.exception("Ошибка в обработке команды '%s'", cmd)
-        await event.respond(f"❌ Внутренняя ошибка: {e}")
+        log.exception("Error handling command '%s'", cmd)
+        await event.respond(f"❌ Internal error: {e}")
 
 
 def _is_command_event(e) -> bool:

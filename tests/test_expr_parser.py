@@ -23,18 +23,18 @@ class TestOr(unittest.TestCase):
     def test_neither(self): self.assertFalse(match("python OR java", "ruby rails"))
 
 class TestNot(unittest.TestCase):
-    def test_absent(self):  self.assertTrue(match("NOT вакансия", "python tutorial"))
-    def test_present(self): self.assertFalse(match("NOT вакансия", "вакансия python"))
+    def test_absent(self):  self.assertTrue(match("NOT vacancy", "python tutorial"))
+    def test_present(self): self.assertFalse(match("NOT vacancy", "vacancy python"))
 
 class TestCombinations(unittest.TestCase):
-    def test_and_not_pass(self):    self.assertTrue(match("python AND NOT вакансия", "вышел python 3.13"))
-    def test_and_not_fail(self):    self.assertFalse(match("python AND NOT вакансия", "вакансия python разработчик"))
+    def test_and_not_pass(self):    self.assertTrue(match("python AND NOT vacancy", "python 3.13 released"))
+    def test_and_not_fail(self):    self.assertFalse(match("python AND NOT vacancy", "vacancy python developer"))
     def test_or_and_pass(self):     self.assertTrue(match("(flask OR django) AND python", "python flask app"))
     def test_or_and_fail(self):     self.assertFalse(match("(flask OR django) AND python", "java django app"))
-    def test_nested_pass(self):     self.assertTrue(match("(a OR b) AND NOT c", "a здесь"))
-    def test_nested_fail_not(self): self.assertFalse(match("(a OR b) AND NOT c", "a и c здесь"))
-    def test_double_not_pass(self): self.assertTrue(match("NOT NOT python", "python есть"))
-    def test_double_not_fail(self): self.assertFalse(match("NOT NOT python", "java только"))
+    def test_nested_pass(self):     self.assertTrue(match("(a OR b) AND NOT c", "a here"))
+    def test_nested_fail_not(self): self.assertFalse(match("(a OR b) AND NOT c", "a and c here"))
+    def test_double_not_pass(self): self.assertTrue(match("NOT NOT python", "python present"))
+    def test_double_not_fail(self): self.assertFalse(match("NOT NOT python", "java only"))
 
 
 # ---------------------------------------------------------------------------
@@ -42,9 +42,9 @@ class TestCombinations(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestQuotedPhrases(unittest.TestCase):
-    def test_match(self):       self.assertTrue(match('"новый релиз"', "вышел новый релиз python"))
-    def test_no_match(self):    self.assertFalse(match('"новый релиз"', "просто новый python"))
-    def test_with_and(self):    self.assertTrue(match('"новый релиз" AND python', "вышел новый релиз python"))
+    def test_match(self):       self.assertTrue(match('"new release"', "new release of python"))
+    def test_no_match(self):    self.assertFalse(match('"new release"', "just new python"))
+    def test_with_and(self):    self.assertTrue(match('"new release" AND python', "new release of python"))
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ class TestCaseInsensitivity(unittest.TestCase):
 
 class TestGlob(unittest.TestCase):
     def test_star_suffix_match(self):
-        self.assertTrue(match("python*", "python3 вышел"))
+        self.assertTrue(match("python*", "python3 released"))
 
     def test_star_suffix_bare_word(self):
         self.assertTrue(match("python*", "python"))
@@ -72,20 +72,20 @@ class TestGlob(unittest.TestCase):
         self.assertFalse(match("python*", "java spring"))
 
     def test_star_prefix_match(self):
-        self.assertTrue(match("*реклам*", "это реклама купи"))
+        self.assertTrue(match("*spam*", "this is spam buy now"))
 
     def test_star_prefix_no_match(self):
-        self.assertFalse(match("*реклам*", "интересный пост"))
+        self.assertFalse(match("*spam*", "interesting post"))
 
     def test_question_mark(self):
-        self.assertTrue(match("байк?", "купи байки"))
+        self.assertTrue(match("bike?", "buy bikes"))
 
     def test_question_mark_no_match(self):
-        self.assertFalse(match("байк?", "python"))
+        self.assertFalse(match("bike?", "python"))
 
     def test_glob_in_expression(self):
-        self.assertTrue(match("python* AND NOT вакансия*", "вышел python3.13"))
-        self.assertFalse(match("python* AND NOT вакансия*", "вакансия python разработчик"))
+        self.assertTrue(match("python* AND NOT vacancy*", "python3.13 released"))
+        self.assertFalse(match("python* AND NOT vacancy*", "vacancy python developer"))
 
     def test_glob_case_insensitive(self):
         self.assertTrue(match("Python*", "python3"))
@@ -97,24 +97,24 @@ class TestGlob(unittest.TestCase):
 
 class TestRegex(unittest.TestCase):
     def test_simple_match(self):
-        self.assertTrue(match("/python/", "это python туториал"))
+        self.assertTrue(match("/python/", "this is a python tutorial"))
 
     def test_simple_no_match(self):
         self.assertFalse(match("/python/", "java spring"))
 
     def test_alternation(self):
-        self.assertTrue(match("/py(thon|3)/", "py3 вышел"))
-        self.assertTrue(match("/py(thon|3)/", "python вышел"))
-        self.assertFalse(match("/py(thon|3)/", "java вышел"))
+        self.assertTrue(match("/py(thon|3)/", "py3 released"))
+        self.assertTrue(match("/py(thon|3)/", "python released"))
+        self.assertFalse(match("/py(thon|3)/", "java released"))
 
     def test_character_class(self):
-        self.assertTrue(match("/байк[иа]/", "купи байки"))
-        self.assertFalse(match("/байк[иа]/", "просто байк"))
+        self.assertTrue(match("/bike[sd]/", "buy bikes"))
+        self.assertFalse(match("/bike[sd]/", "just bike"))
 
     def test_regex_in_expression(self):
-        self.assertTrue(match("/реклам[аы]?/ OR /спам/", "это реклама"))
-        self.assertTrue(match("/реклам[аы]?/ OR /спам/", "это спам"))
-        self.assertFalse(match("/реклам[аы]?/ OR /спам/", "интересный пост"))
+        self.assertTrue(match("/ad[sz]?/ OR /spam/", "this is ads"))
+        self.assertTrue(match("/ad[sz]?/ OR /spam/", "this is spam"))
+        self.assertFalse(match("/ad[sz]?/ OR /spam/", "interesting post"))
 
     def test_regex_case_insensitive(self):
         self.assertTrue(match("/Python/", "python tutorial"))
@@ -146,8 +146,8 @@ class TestInvalidExpressions(unittest.TestCase):
     def test_bare_and(self):        self._err("AND")
     def test_dangling_operator(self): self._err("python AND")
     def test_unclosed_paren(self):  self._err("(python AND flask")
-    def test_unclosed_quote(self):  self._err('"незакрытая')
-    def test_unclosed_regex(self):  self._err("/незакрытый")
+    def test_unclosed_quote(self):  self._err('"unclosed')
+    def test_unclosed_regex(self):  self._err("/unclosed")
     def test_implicit_and(self):    self._err("python flask")
 
 

@@ -22,11 +22,11 @@ def _eval_filters(filters: list[Filter], text: str, author: str) -> list[str]:
         try:
             if expr_parser.evaluate(expr_parser.get_ast(f.id, f.expression), text, author):
                 if f.type == "block":
-                    log.debug("Заблокировано фильтром '%s' (pipeline %d)", f.name, f.pipeline_id)
+                    log.debug("Blocked by filter '%s' (pipeline %d)", f.name, f.pipeline_id)
                     return []
                 return [f.name]
         except Exception:
-            log.warning("Ошибка в фильтре '%s'", f.name, exc_info=True)
+            log.warning("Error in filter '%s'", f.name, exc_info=True)
 
     return ["*"]  # no filter matched → pass-all
 
@@ -60,7 +60,7 @@ async def add_pipeline(
     try:
         entity = await client.get_entity(source_identifier)
     except (ValueError, UsernameNotOccupiedError, UsernameInvalidError, TypeError) as e:
-        raise ValueError(f"Источник не найден: {source_identifier}") from e
+        raise ValueError(f"Source not found: {source_identifier}") from e
     source_id = get_peer_id(entity)
     source_title = getattr(entity, "title", None) or getattr(entity, "first_name", str(source_id))
     source_username = getattr(entity, "username", None)
@@ -74,21 +74,21 @@ async def add_pipeline(
             out_entity = await client.get_entity(output_identifier)
             output_id = get_peer_id(out_entity)
         except (ValueError, UsernameNotOccupiedError, UsernameInvalidError, TypeError) as e:
-            raise ValueError(f"Выход не найден: {output_identifier}") from e
+            raise ValueError(f"Output not found: {output_identifier}") from e
 
     existing = await storage.get_pipeline_by_name(name)
     if existing:
-        raise ValueError(f"Пайплайн с именем '{name}' уже существует")
+        raise ValueError(f"Pipeline with name '{name}' already exists")
 
     pipeline = await storage.save_pipeline(name, source_id, source_title, source_username, output_id)
-    log.info("Пайплайн создан: name=%s source=%d output=%d", name, source_id, output_id)
+    log.info("Pipeline created: name=%s source=%d output=%d", name, source_id, output_id)
     return pipeline
 
 
 async def remove_pipeline(name: str) -> bool:
     result = await storage.delete_pipeline(name)
     if result:
-        log.info("Пайплайн удалён: name=%s", name)
+        log.info("Pipeline deleted: name=%s", name)
     return result
 
 
@@ -99,15 +99,15 @@ async def add_filter(
     filter_type: str = "allow",
 ) -> None:
     if filter_type not in ("allow", "block"):
-        raise ValueError(f"Неизвестный тип фильтра: {filter_type!r}. Используйте 'allow' или 'block'")
+        raise ValueError(f"Unknown filter type: {filter_type!r}. Use 'allow' or 'block'")
     expr_parser.parse(expression)  # raises SyntaxError if invalid
     await storage.save_filter(pipeline_id, name, expression, filter_type)
-    log.info("Фильтр добавлен: pipeline_id=%d name=%s type=%s expr=%r",
+    log.info("Filter added: pipeline_id=%d name=%s type=%s expr=%r",
              pipeline_id, name, filter_type, expression)
 
 
 async def remove_filter(pipeline_id: int, name: str) -> bool:
     result = await storage.delete_filter(pipeline_id, name)
     if result:
-        log.info("Фильтр удалён: pipeline_id=%d name=%s", pipeline_id, name)
+        log.info("Filter deleted: pipeline_id=%d name=%s", pipeline_id, name)
     return result
